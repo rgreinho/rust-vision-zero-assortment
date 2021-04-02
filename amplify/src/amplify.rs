@@ -19,7 +19,7 @@ pub struct Group {
     pub slug: String,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
 pub struct Organization {
     pub description: Option<String>,
     pub name: String,
@@ -30,7 +30,7 @@ pub struct Organization {
     // pub causes: Causes,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
 pub struct Address {
     pub address1: String,
     pub address2: Option<String>,
@@ -43,11 +43,11 @@ pub struct Address {
     pub venue: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
 pub struct Contact {
     pub name: Option<String>,
     pub phone: Option<String>,
-    pub email: String,
+    pub email: Option<String>,
 }
 
 // #[derive(Debug, Deserialize, Clone, PartialEq)]
@@ -61,7 +61,7 @@ pub struct Cause {
     pub description: String,
 }
 
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, PartialEq, PartialOrd)]
 pub struct Amplify {
     pub name: String,
     pub description: Option<String>,
@@ -83,7 +83,7 @@ impl From<Organization> for Amplify {
         let categories: Vec<String> = item.causes.into_iter().map(|c| c.name).collect();
         Amplify {
             name: item.name,
-            email: item.contact.email,
+            email: item.contact.email.unwrap_or_default(),
             address: format!(
                 "{} {}",
                 item.address.address1,
