@@ -2,14 +2,23 @@ use amplify::amplify::{Amplify, Campaign, Campaigns, Organization};
 use eyre::{eyre, Result};
 use futures::stream::{self, StreamExt};
 use regex::Regex;
+use tokio_retry::strategy::{jitter, FibonacciBackoff};
+use tokio_retry::Retry;
+use tracing::info;
+use tracing_subscriber;
 // use std::io;
 
-static SEARCH_URL: &'static str = "https://api.givegab.com/v1/campaigns";
+// static SEARCH_URL: &'static str = "https://api.givegab.com/v1/campaigns";
+static SEARCH_URL: &'static str =
+    "http://slowwly.robertomurray.co.uk/delay/3000/url/https://api.givegab.com/v1/campaigns";
 static DETAILS_URL: &'static str = "https://www.amplifyatx.org/organizations";
 const CONCURRENT_REQUESTS: usize = 50;
 
 #[tokio::main]
 pub async fn main() -> Result<()> {
+    // install global collector configured based on RUST_LOG env var.
+    tracing_subscriber::fmt::init();
+
     // Create a reqwest client.
     let client = reqwest::Client::new();
 
@@ -20,7 +29,7 @@ pub async fn main() -> Result<()> {
 
     // Collect the responses.
     let campaign_collection = get_campaign_tasks
-        .map(|r| r.unwrap_or_default())
+        .map(|r| r.unwrap())
         .collect::<Vec<_>>()
         .await;
 
@@ -60,21 +69,26 @@ pub async fn main() -> Result<()> {
 }
 
 async fn fetch_campaigns(client: &reqwest::Client, page: u8) -> Result<Vec<Campaign>> {
-    let response = client
-        .get(SEARCH_URL)
-        .query(&[
-            ("donatable", "true"),
-            ("dog_campaign", ""),
-            ("dog_id", "510"),
-            ("use_new_search", "true"),
-            ("visible_only", "true"),
-            ("with", "address,dog_url,has_profile,stats,story_image_url"),
-            ("sort_column", "alpha"),
-            ("sort_order", "asc"),
-            ("page", &page.to_string()),
-        ])
-        .send()
-        .await?;
+    let retry_strategy = FibonacciBackoff::from_millis(1000)
+        .map(jitter) // add jitter to delays
+        .take(3); // limit to 3 retries
+    let response = Retry::spawn(retry_strategy, || {
+        client
+            .get(SEARCH_URL)
+            .query(&[
+                ("donatable", "true"),
+                ("dog_campaign", ""),
+                ("dog_id", "510"),
+                ("use_new_search", "true"),
+                ("visible_only", "true"),
+                ("with", "address,dog_url,has_profile,stats,story_image_url"),
+                ("sort_column", "alpha"),
+                ("sort_order", "asc"),
+                ("page", &page.to_string()),
+            ])
+            .send()
+    })
+    .await?;
 
     let campaigns = response.json::<Campaigns>().await?;
     Ok(campaigns.campaigns)
@@ -82,10 +96,13 @@ async fn fetch_campaigns(client: &reqwest::Client, page: u8) -> Result<Vec<Campa
 
 async fn fetch_organizations(client: &reqwest::Client, slug: String) -> Result<Organization> {
     let re = Regex::new(r#"var org = new app.Group\((.*)\);"#).unwrap();
-    let response = client
-        .get(format!("{}/{}", DETAILS_URL, &slug))
-        .send()
-        .await?;
+    let retry_strategy = FibonacciBackoff::from_millis(1000)
+        .map(jitter) // add jitter to delays
+        .take(3);
+    let response = Retry::spawn(retry_strategy, || {
+        client.get(format!("{}/{}", DETAILS_URL, &slug)).send()
+    })
+    .await?;
     let detail_page = response.text().await?;
     match re.captures(&detail_page) {
         Some(c) => {
